@@ -111,10 +111,15 @@ jobs:
         env:
           EMAIL: ${{ secrets.LOGIN_EMAIL }}
           PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
-          LOGIN_URL: ${{ secrets.LOGIN_URL }}
-          RENEW_URL: ${{ secrets.RENEW_URL }}
+          LOGIN_URL: ${{ secrets.LOGIN_URL || 'https://dashboard.katabump.com/auth/login' }}
+          RENEW_URL: ${{ secrets.RENEW_URL || 'https://dashboard.katabump.com/servers/edit?id=124653' }}
         run: |
           echo "🚀 开始执行续期任务..."
+          echo "🔧 配置信息:"
+          echo "📧 邮箱: ${EMAIL:0:3}***"
+          echo "🔗 登录URL: $LOGIN_URL"
+          echo "🔗 续期URL: $RENEW_URL"
+          echo "========================"
           python main.py
           
       - name: 📊 显示运行状态

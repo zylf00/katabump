@@ -29,12 +29,21 @@ class ServerRenewBot:
         # 从环境变量获取配置
         self.email = os.getenv('EMAIL')
         self.password = os.getenv('PASSWORD')
-        self.login_url = os.getenv('LOGIN_URL', 'https://dashboard.katabump.com/auth/login')
-        self.renew_url = os.getenv('RENEW_URL', 'https://dashboard.katabump.com/servers/edit?id=124653')
+        self.login_url = os.getenv('LOGIN_URL') or 'https://dashboard.katabump.com/auth/login'
+        self.renew_url = os.getenv('RENEW_URL') or 'https://dashboard.katabump.com/servers/edit?id=124653'
         
         # 验证配置
         if not self.email or not self.password:
             logger.error('❌ 请设置 EMAIL 和 PASSWORD 环境变量')
+            sys.exit(1)
+        
+        # 验证URL格式
+        if not self.login_url.startswith('http'):
+            logger.error(f'❌ 无效的登录URL: {self.login_url}')
+            sys.exit(1)
+            
+        if not self.renew_url.startswith('http'):
+            logger.error(f'❌ 无效的续期URL: {self.renew_url}')
             sys.exit(1)
         
         logger.info(f'🚀 开始执行续期任务 - {datetime.now()}')
@@ -76,6 +85,12 @@ class ServerRenewBot:
             options.add_argument('--no-first-run')
             options.add_argument('--disable-default-apps')
             options.add_argument('--disable-features=VizDisplayCompositor')
+            options.add_argument('--disable-web-security')
+            options.add_argument('--allow-running-insecure-content')
+            options.add_argument('--disable-background-timer-throttling')
+            options.add_argument('--disable-backgrounding-occluded-windows')
+            options.add_argument('--disable-renderer-backgrounding')
+            options.add_argument('--disable-ipc-flooding-protection')
             
             # 随机User-Agent
             user_agents = [
@@ -86,10 +101,25 @@ class ServerRenewBot:
             ]
             options.add_argument(f'--user-agent={random.choice(user_agents)}')
             
-            options.add_experimental_option('excludeSwitches', ['enable-automation'])
-            options.add_experimental_option('useAutomationExtension', False)
+            # 使用兼容的实验选项设置方式
+            try:
+                # 尝试新的设置方式
+                prefs = {
+                    "profile.default_content_setting_values.notifications": 2,
+                    "profile.managed_default_content_settings.images": 2
+                }
+                options.add_experimental_option("prefs", prefs)
+            except Exception as e:
+                logger.warning(f'实验选项设置失败: {e}')
             
-            driver = uc.Chrome(options=options, version_main=None)
+            # 创建驱动实例，使用更兼容的参数
+            driver = uc.Chrome(
+                options=options, 
+                version_main=None,
+                driver_executable_path=None,
+                browser_executable_path=None,
+                use_subprocess=True
+            )
             
             # 反检测脚本
             driver.execute_script("""
@@ -489,7 +519,159 @@ class ServerRenewBot:
             logger.error(f'❌ Playwright初始化失败: {e}')
             return False
     
+    async def run_with_basic_selenium(self):
+        """使用基础 Selenium 作为备用方案"""
+        try:
+            from selenium import webdriver
+            from selenium.webdriver.chrome.options import Options
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            from selenium.common.exceptions import TimeoutException, NoSuchElementException
+            
+            logger.info('🔧 初始化基础 Selenium（备用方案）...')
+            
+            options = Options()
+            options.add_argument('--headless')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--window-size=1920,1080')
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_argument('--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+            
+            driver = webdriver.Chrome(options=options)
+            wait = WebDriverWait(driver, 30)
+            
+            try:
+                # 登录流程
+                logger.info('🌐 基础Selenium: 访问登录页面...')
+                driver.get(self.login_url)
+                time.sleep(3)
+                
+                # 输入登录信息
+                email_field = wait.until(EC.element_to_be_clickable((By.ID, 'email')))
+                password_field = driver.find_element(By.ID, 'password')
+                login_btn = driver.find_element(By.ID, 'submit')
+                
+                email_field.clear()
+                email_field.send_keys(self.email)
+                time.sleep(1)
+                
+                password_field.clear()
+                password_field.send_keys(self.password)
+                time.sleep(1)
+                
+                logger.info('🖱️ 基础Selenium: 点击登录...')
+                login_btn.click()
+                time.sleep(5)
+                
+                # 检查登录结果
+                if 'dashboard' not in driver.current_url:
+                    logger.error(f'❌ 基础Selenium: 登录失败，当前URL: {driver.current_url}')
+                    driver.save_screenshot('/tmp/basic_selenium_login_failed.png')
+                    return False
+                
+                logger.info('✅ 基础Selenium: 登录成功！')
+                
+                # 续期流程
+                logger.info('🌐 基础Selenium: 访问续期页面...')
+                driver.get(self.renew_url)
+                time.sleep(3)
+                
+                # 查找续期按钮
+                renew_btn = None
+                selectors = [
+                    'button.btn.btn-outline-primary',
+                    'button[type="submit"]',
+                    '.btn-primary'
+                ]
+                
+                for selector in selectors:
+                    try:
+                        renew_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+                        logger.info(f'✅ 基础Selenium: 找到续期按钮: {selector}')
+                        break
+                    except TimeoutException:
+                        continue
+                
+                if not renew_btn:
+                    logger.error('❌ 基础Selenium: 未找到续期按钮')
+                    driver.save_screenshot('/tmp/basic_selenium_no_button.png')
+                    return False
+                
+                logger.info('🖱️ 基础Selenium: 点击续期按钮...')
+                renew_btn.click()
+                time.sleep(5)
+                
+                # 简单等待（不处理复杂的Turnstile）
+                logger.info('⏳ 基础Selenium: 等待页面响应...')
+                time.sleep(10)
+                
+                driver.save_screenshot('/tmp/basic_selenium_final.png')
+                logger.info('✅ 基础Selenium: 执行完成')
+                return True
+                
+            except Exception as e:
+                logger.error(f'❌ 基础Selenium执行错误: {e}')
+                driver.save_screenshot('/tmp/basic_selenium_error.png')
+                return False
+            finally:
+                driver.quit()
+                
+        except ImportError:
+            logger.error('❌ 基础Selenium不可用')
+            return False
+        except Exception as e:
+            logger.error(f'❌ 基础Selenium初始化失败: {e}')
+            return False
+    
     async def handle_turnstile_playwright(self, page):
+        """处理Turnstile验证 - Playwright版本"""
+        max_wait_time = 90
+        
+        try:
+            # 等待Turnstile加载
+            await page.wait_for_timeout(5000)
+            
+            # 尝试多种方法处理Turnstile
+            turnstile_selectors = [
+                '[data-sitekey]',
+                '.cf-turnstile',
+                'iframe[src*="turnstile"]'
+            ]
+            
+            for selector in turnstile_selectors:
+                try:
+                    element = await page.wait_for_selector(selector, timeout=10000)
+                    if element:
+                        logger.info(f'🎯 Playwright: 找到Turnstile: {selector}')
+                        await element.hover()
+                        await page.wait_for_timeout(1000)
+                        await element.click()
+                        await page.wait_for_timeout(3000)
+                        break
+                except:
+                    continue
+            
+            # 等待验证完成
+            try:
+                await page.wait_for_function(
+                    '''() => {
+                        const token = document.querySelector('[name="cf-turnstile-response"]');
+                        return token && token.value && token.value.length > 10;
+                    }''',
+                    timeout=max_wait_time * 1000
+                )
+                logger.info('✅ Playwright: Turnstile验证完成！')
+                return True
+            except:
+                logger.warning('⚠️ Playwright: Turnstile验证可能未完成')
+                return False
+                
+        except Exception as e:
+            logger.warning(f'⚠️ Playwright: Turnstile处理异常: {e}')
+            return False
         """处理Turnstile验证 - Playwright版本"""
         max_wait_time = 90
         
@@ -550,7 +732,7 @@ class ServerRenewBot:
         except Exception as e:
             logger.error(f'❌ 方案1执行异常: {e}')
         
-        # 如果方案1失败，尝试方案2
+        # 如果方案1失败，尝试方案2: Playwright
         if not success:
             logger.info('📋 === 尝试方案2: Playwright ===')
             try:
@@ -560,6 +742,17 @@ class ServerRenewBot:
                     return True
             except Exception as e:
                 logger.error(f'❌ 方案2执行异常: {e}')
+        
+        # 如果前两个方案都失败，尝试方案3: 基础Selenium
+        if not success:
+            logger.info('📋 === 尝试方案3: 基础Selenium ===')
+            try:
+                success = await self.run_with_basic_selenium()
+                if success:
+                    logger.info('🎉 方案3执行成功！')
+                    return True
+            except Exception as e:
+                logger.error(f'❌ 方案3执行异常: {e}')
         
         # 所有方案都失败
         if not success:

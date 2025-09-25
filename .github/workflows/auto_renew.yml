@@ -91,4 +91,61 @@ jobs:
           
       - name: 🚀 运行续期脚本
         env:
-          EMAIL: ${{ secrets.
+          EMAIL: ${{ secrets.LOGIN_EMAIL }}
+          PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
+          LOGIN_URL: ${{ secrets.LOGIN_URL }}
+          RENEW_URL: ${{ secrets.RENEW_URL }}
+        run: |
+          echo "🚀 开始执行续期任务..."
+          python main.py
+          
+      - name: 📊 显示运行状态
+        if: always()
+        run: |
+          echo "================================="
+          echo "📋 任务执行完成"
+          echo "⏰ 完成时间: $(date)"
+          echo "📁 工作目录: $(pwd)"
+          echo "📂 文件列表:"
+          ls -la
+          echo "================================="
+          
+          # 显示日志文件（如果存在）
+          if [ -f "renew.log" ]; then
+            echo "📄 执行日志:"
+            cat renew.log
+          fi
+          
+      - name: 📸 上传截图和日志
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: 执行结果-${{ github.run_number }}
+          path: |
+            /tmp/*.png
+            renew.log
+            *.log
+          retention-days: 7
+          if-no-files-found: ignore
+          
+      - name: 📬 发送通知 (可选)
+        if: always()
+        run: |
+          # 这里可以添加通知逻辑
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ 续期任务执行成功！"
+            # 可以在这里添加成功通知，比如：
+            # curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            #   -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            #   -d "text=✅ 服务器续期成功 - $(date)"
+          else
+            echo "❌ 续期任务执行失败！"
+            # 可以在这里添加失败通知
+          fi
+          
+      - name: 🧹 清理临时文件
+        if: always()
+        run: |
+          # 清理可能的临时文件
+          sudo rm -rf /tmp/chrome* /tmp/.X* 2>/dev/null || true
+          echo "临时文件清理完成"

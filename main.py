@@ -174,19 +174,19 @@ class ServerRenewBot:
                     'button.btn.btn-outline-primary',
                     'button[type="submit"]',
                     '.btn-primary',
-                    'button:contains("续期")',
-                    'button:contains("Renew")',
-                    'button:contains("延期")'
+                    '//button[contains(text(), "续期")]',
+                    '//button[contains(text(), "Renew")]',
+                    '//button[contains(text(), "延期")]'
                 ]
                 
                 renew_btn = None
                 for selector in renew_button_selectors:
                     try:
-                        if ':contains(' in selector:
-                            # XPath for text content
-                            xpath_selector = f"//button[contains(text(), '{selector.split('\"')[1]}')]"
-                            renew_btn = wait.until(EC.element_to_be_clickable((By.XPATH, xpath_selector)))
+                        if selector.startswith('//'):
+                            # 这是XPath选择器
+                            renew_btn = wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
                         else:
+                            # 这是CSS选择器
                             renew_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
                         
                         logger.info(f'✅ 找到续期按钮: {selector}')
@@ -216,17 +216,18 @@ class ServerRenewBot:
                         'button[type="submit"]',
                         '.btn-success',
                         '.btn-primary:not(.btn-outline-primary)',
-                        'button:contains("确认")',
-                        'button:contains("Confirm")',
-                        'button:contains("完成")'
+                        '//button[contains(text(), "确认")]',
+                        '//button[contains(text(), "Confirm")]',
+                        '//button[contains(text(), "完成")]'
                     ]
                     
                     for selector in confirm_selectors:
                         try:
-                            if ':contains(' in selector:
-                                xpath_selector = f"//button[contains(text(), '{selector.split('\"')[1]}')]"
-                                confirm_btn = driver.find_element(By.XPATH, xpath_selector)
+                            if selector.startswith('//'):
+                                # XPath选择器
+                                confirm_btn = driver.find_element(By.XPATH, selector)
                             else:
+                                # CSS选择器
                                 confirm_btn = driver.find_element(By.CSS_SELECTOR, selector)
                             
                             if confirm_btn.is_displayed() and confirm_btn.is_enabled():

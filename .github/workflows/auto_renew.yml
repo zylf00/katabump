@@ -45,24 +45,42 @@ jobs:
           # 更新包列表
           sudo apt-get update -qq
           
-          # 安装Chrome和相关依赖
-          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-          sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
+          # 方法1: 使用官方推荐的新方式安装Chrome
+          curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
           sudo apt-get update -qq
           
+          # 先尝试安装Chrome
+          sudo apt-get install -y -qq google-chrome-stable || {
+            echo "Chrome安装失败，尝试备用方案..."
+            # 备用方案：直接下载Chrome deb包
+            wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get install -f -y
+          }
+          
+          # 安装基础依赖（处理Ubuntu版本差异）
           sudo apt-get install -y -qq \
-            google-chrome-stable \
             xvfb \
             fonts-liberation \
-            libasound2 \
-            libatk-bridge2.0-0 \
+            ca-certificates \
+            fonts-noto-color-emoji \
+            libxss1 \
+            libgbm1 \
             libdrm2 \
             libxcomposite1 \
             libxdamage1 \
             libxrandr2 \
-            libgbm1 \
-            libxss1 \
-            libnss3
+            libnss3 \
+            libatk-bridge2.0-0 \
+            libgtk-3-0 \
+            libatspi2.0-0 || {
+            # 如果部分包安装失败，尝试替代包名
+            echo "尝试安装替代包名..."
+            sudo apt-get install -y -qq \
+              libasound2-dev \
+              libasound2t64 \
+              || sudo apt-get install -y -qq libasound2 || echo "音频库安装跳过"
+          }
             
       - name: 🔍 检查Chrome版本
         run: |

@@ -14,6 +14,11 @@ on:
         required: false
         default: '手动测试'
         type: string
+      use_real_mouse:
+        description: '使用真实鼠标点击'
+        required: false
+        default: true
+        type: boolean
 
 # 环境变量
 env:
@@ -28,7 +33,7 @@ jobs:
   renew-server:
     name: 续期服务器
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     
     steps:
       - name: 📥 检出代码
@@ -61,6 +66,8 @@ jobs:
           # 安装基础依赖（处理Ubuntu版本差异）
           sudo apt-get install -y -qq \
             xvfb \
+            fluxbox \
+            x11-utils \
             fonts-liberation \
             ca-certificates \
             fonts-noto-color-emoji \
@@ -81,7 +88,7 @@ jobs:
               libasound2t64 \
               || sudo apt-get install -y -qq libasound2 || echo "音频库安装跳过"
           }
-            
+          
       - name: 🔍 检查Chrome版本
         run: |
           CHROME_VERSION=$(google-chrome --version)
@@ -113,9 +120,6 @@ jobs:
           export DISPLAY=:99
           echo "DISPLAY=:99" >> $GITHUB_ENV
           
-          # 安装并启动轻量级窗口管理器
-          sudo apt-get install -y fluxbox
-          
           # 等待显示服务器启动
           sleep 3
           
@@ -130,7 +134,7 @@ jobs:
           PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
           LOGIN_URL: ${{ secrets.LOGIN_URL || 'https://dashboard.katabump.com/auth/login' }}
           RENEW_URL: ${{ secrets.RENEW_URL || 'https://dashboard.katabump.com/servers/edit?id=124653' }}
-          USE_REAL_MOUSE: ${{ secrets.USE_REAL_MOUSE || 'true' }}  # 默认使用真实鼠标
+          USE_REAL_MOUSE: ${{ inputs.use_real_mouse || 'true' }}
         run: |
           echo "🚀 开始执行续期任务..."
           echo "🔧 配置信息:"
@@ -151,10 +155,32 @@ jobs:
           # 根据设置选择使用哪个脚本
           if [ "$USE_REAL_MOUSE" = "true" ]; then
             echo "🖱️ 使用真实鼠标点击模式"
-            python real_mouse_main.py
+            if [ -f "real_mouse_main.py" ]; then
+              python real_mouse_main.py
+            else
+              echo "⚠️ 真实鼠标脚本不存在，使用传统模式"
+              python main.py
+            fi
           else
             echo "🖱️ 使用传统自动化模式"
             python main.py
+          fi
+          
+      - name: 📊 显示运行状态
+        if: always()
+        run: |
+          echo "================================="
+          echo "📋 任务执行完成"
+          echo "⏰ 完成时间: $(date)"
+          echo "📁 工作目录: $(pwd)"
+          echo "📂 文件列表:"
+          ls -la
+          echo "================================="
+          
+          # 显示日志文件（如果存在）
+          if [ -f "renew.log" ]; then
+            echo "📄 执行日志:"
+            cat renew.log
           fi
           
       - name: 📸 保存详细调试信息
@@ -180,23 +206,6 @@ jobs:
           echo "🖥️ 显示服务器状态:"
           ps aux | grep Xvfb | head -3 2>/dev/null || echo "Xvfb未运行"
           
-      - name: 📊 显示运行状态
-        if: always()
-        run: |
-          echo "================================="
-          echo "📋 任务执行完成"
-          echo "⏰ 完成时间: $(date)"
-          echo "📁 工作目录: $(pwd)"
-          echo "📂 文件列表:"
-          ls -la
-          echo "================================="
-          
-          # 显示日志文件（如果存在）
-          if [ -f "renew.log" ]; then
-            echo "📄 执行日志:"
-            cat renew.log
-          fi
-          
       - name: 📸 上传截图和日志
         if: always()
         uses: actions/upload-artifact@v4
@@ -208,10 +217,9 @@ jobs:
             renew.log
             *.log
           retention-days: 7
-          if-no-files-found: ignore7
           if-no-files-found: ignore
           
-      - name: 📬 发送通知 (可选)
+      - name: 📬 发送通知
         if: always()
         run: |
           # 这里可以添加通知逻辑

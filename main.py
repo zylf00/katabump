@@ -70,7 +70,8 @@ class ServerRenewBot:
             from selenium.webdriver.common.by import By
             from selenium.webdriver.support.ui import WebDriverWait
             from selenium.webdriver.support import expected_conditions as EC
-            from selenium.common.exceptions import TimeoutException, NoSuchElementException
+            from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
+            from selenium.webdriver.common.action_chains import ActionChains
             
             logger.info('🔧 初始化 undetected-chromedriver...')
             
@@ -295,11 +296,58 @@ class ServerRenewBot:
                 pass
     
     async def handle_turnstile_selenium(self, driver, wait):
-        """处理Turnstile验证 - Selenium版本"""
+        """处理Turnstile验证 - Selenium版本 - 改进版"""
         max_wait_time = 90  # 最大等待90秒
         start_time = time.time()
         
         logger.info('🔍 寻找Turnstile验证框...')
+        
+        # 首先注入 screenX/screenY 补丁来绕过检测
+        logger.info('🛡️ 注入Turnstile绕过补丁...')
+        turnstile_patch_script = """
+        // CDP MouseEvent screenX/screenY 补丁
+        (function() {
+            const originalAddEventListener = EventTarget.prototype.addEventListener;
+            EventTarget.prototype.addEventListener = function(type, listener, options) {
+                if (type === 'click' || type === 'mousedown' || type === 'mouseup') {
+                    const wrappedListener = function(event) {
+                        if (event.isTrusted === false) {
+                            // 为自动化事件添加真实的屏幕坐标
+                            Object.defineProperty(event, 'screenX', {
+                                value: event.clientX + window.screenX + Math.floor(Math.random() * 10),
+                                writable: false
+                            });
+                            Object.defineProperty(event, 'screenY', {
+                                value: event.clientY + window.screenY + Math.floor(Math.random() * 10),
+                                writable: false
+                            });
+                        }
+                        return listener.call(this, event);
+                    };
+                    return originalAddEventListener.call(this, type, wrappedListener, options);
+                }
+                return originalAddEventListener.call(this, type, listener, options);
+            };
+            
+            // 重写鼠标事件构造函数
+            const originalMouseEvent = window.MouseEvent;
+            window.MouseEvent = function(type, eventInitDict) {
+                if (eventInitDict && typeof eventInitDict.screenX === 'undefined') {
+                    eventInitDict.screenX = (eventInitDict.clientX || 0) + window.screenX + Math.floor(Math.random() * 10);
+                    eventInitDict.screenY = (eventInitDict.clientY || 0) + window.screenY + Math.floor(Math.random() * 10);
+                }
+                return new originalMouseEvent(type, eventInitDict);
+            };
+            
+            console.log('Turnstile绕过补丁已注入');
+        })();
+        """
+        
+        try:
+            driver.execute_script(turnstile_patch_script)
+            logger.info('✅ 补丁注入成功')
+        except Exception as e:
+            logger.warning(f'⚠️ 补丁注入失败: {e}')
         
         while time.time() - start_time < max_wait_time:
             try:
@@ -311,82 +359,137 @@ class ServerRenewBot:
                     if token_value and len(token_value) > 10:
                         logger.info('✅ 检测到Turnstile验证已完成！')
                         return True
-                except (NoSuchElementException, TimeoutException):
+                except:
                     pass
                 
-                # 方法2: 尝试找到并点击Turnstile元素
-                turnstile_selectors = [
-                    '[data-sitekey]',
-                    '.cf-turnstile',
-                    'iframe[src*="turnstile"]',
-                    '[id*="turnstile"]',
-                    '[class*="turnstile"]'
-                ]
-                
-                for selector in turnstile_selectors:
-                    try:
-                        elements = driver.find_elements(By.CSS_SELECTOR, selector)
-                        for element in elements:
-                            if element.is_displayed():
-                                logger.info(f'🎯 找到Turnstile元素: {selector}')
-                                
-                                # 滚动到元素位置
-                                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-                                time.sleep(1)
-                                
-                                # 模拟鼠标悬停和点击
-                                from selenium.webdriver.common.action_chains import ActionChains
-                                actions = ActionChains(driver)
-                                actions.move_to_element(element).pause(1).click().perform()
-                                
-                                logger.info('🖱️ 已点击Turnstile元素')
-                                time.sleep(3)
-                                break
-                    except Exception as e:
-                        continue
-                
-                # 方法3: 尝试处理iframe中的Turnstile
+                # 方法2: 寻找Turnstile iframe并点击其中的checkbox
                 try:
+                    # 查找所有iframe
                     iframes = driver.find_elements(By.TAG_NAME, 'iframe')
                     for iframe in iframes:
                         src = iframe.get_attribute('src') or ''
-                        if 'turnstile' in src or 'cloudflare' in src:
-                            logger.info('🔍 找到Turnstile iframe，尝试切换...')
+                        if 'challenges.cloudflare.com' in src or 'turnstile' in src:
+                            logger.info('🎯 找到Turnstile iframe')
+                            
+                            # 切换到iframe
                             driver.switch_to.frame(iframe)
                             
-                            # 在iframe中查找checkbox
                             try:
-                                checkbox = driver.find_element(By.CSS_SELECTOR, 'input[type="checkbox"], .checkbox, [role="checkbox"]')
-                                if checkbox.is_displayed():
-                                    checkbox.click()
-                                    logger.info('✅ 点击了Turnstile复选框')
-                                    time.sleep(2)
-                            except:
-                                pass
+                                # 查找checkbox - 使用多种选择器
+                                checkbox_selectors = [
+                                    'input[type="checkbox"]',
+                                    '[role="checkbox"]',
+                                    '.cb-i',
+                                    '.checkbox',
+                                    'span[role="checkbox"]'
+                                ]
+                                
+                                for selector in checkbox_selectors:
+                                    try:
+                                        checkbox = driver.find_element(By.CSS_SELECTOR, selector)
+                                        if checkbox.is_displayed():
+                                            logger.info(f'🖱️ 找到并点击checkbox: {selector}')
+                                            
+                                            # 使用JavaScript点击以避免被检测
+                                            driver.execute_script("""
+                                                arguments[0].dispatchEvent(new MouseEvent('mouseover', {
+                                                    bubbles: true,
+                                                    cancelable: true,
+                                                    view: window,
+                                                    screenX: arguments[0].getBoundingClientRect().x + window.screenX + 5,
+                                                    screenY: arguments[0].getBoundingClientRect().y + window.screenY + 5
+                                                }));
+                                            """, checkbox)
+                                            time.sleep(0.5)
+                                            
+                                            driver.execute_script("""
+                                                arguments[0].dispatchEvent(new MouseEvent('mousedown', {
+                                                    bubbles: true,
+                                                    cancelable: true,
+                                                    view: window,
+                                                    screenX: arguments[0].getBoundingClientRect().x + window.screenX + 5,
+                                                    screenY: arguments[0].getBoundingClientRect().y + window.screenY + 5
+                                                }));
+                                            """, checkbox)
+                                            time.sleep(0.1)
+                                            
+                                            driver.execute_script("""
+                                                arguments[0].dispatchEvent(new MouseEvent('mouseup', {
+                                                    bubbles: true,
+                                                    cancelable: true,
+                                                    view: window,
+                                                    screenX: arguments[0].getBoundingClientRect().x + window.screenX + 5,
+                                                    screenY: arguments[0].getBoundingClientRect().y + window.screenY + 5
+                                                }));
+                                            """, checkbox)
+                                            time.sleep(0.1)
+                                            
+                                            driver.execute_script("""
+                                                arguments[0].dispatchEvent(new MouseEvent('click', {
+                                                    bubbles: true,
+                                                    cancelable: true,
+                                                    view: window,
+                                                    screenX: arguments[0].getBoundingClientRect().x + window.screenX + 5,
+                                                    screenY: arguments[0].getBoundingClientRect().y + window.screenY + 5
+                                                }));
+                                            """, checkbox)
+                                            
+                                            logger.info('✅ 已点击Turnstile checkbox')
+                                            driver.switch_to.default_content()
+                                            
+                                            # 等待验证完成
+                                            time.sleep(3)
+                                            return self.wait_for_turnstile_completion(driver, 30)
+                                            
+                                    except Exception as e:
+                                        continue
+                                        
+                            except Exception as e:
+                                logger.warning(f'⚠️ iframe内操作失败: {e}')
+                            finally:
+                                driver.switch_to.default_content()
                             
-                            driver.switch_to.default_content()
+                            break
+                            
+                except Exception as e:
+                    pass
+                
+                # 方法3: 尝试点击外部容器
+                try:
+                    turnstile_containers = driver.find_elements(By.CSS_SELECTOR, '[data-sitekey], .cf-turnstile, [id*="turnstile"]')
+                    for container in turnstile_containers:
+                        if container.is_displayed():
+                            logger.info('🎯 找到Turnstile容器，尝试点击')
+                            
+                            # 滚动到元素
+                            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", container)
+                            time.sleep(1)
+                            
+                            # 使用改进的点击方法
+                            driver.execute_script("""
+                                const element = arguments[0];
+                                const rect = element.getBoundingClientRect();
+                                const x = rect.left + rect.width / 2;
+                                const y = rect.top + rect.height / 2;
+                                
+                                const clickEvent = new MouseEvent('click', {
+                                    bubbles: true,
+                                    cancelable: true,
+                                    view: window,
+                                    clientX: x,
+                                    clientY: y,
+                                    screenX: x + window.screenX + Math.floor(Math.random() * 10),
+                                    screenY: y + window.screenY + Math.floor(Math.random() * 10)
+                                });
+                                
+                                element.dispatchEvent(clickEvent);
+                            """, container)
+                            
                             time.sleep(2)
                             break
+                            
                 except Exception as e:
-                    driver.switch_to.default_content()
-                
-                # 方法4: 检查页面是否有成功指示
-                success_indicators = [
-                    '//*[contains(@class, "success")]',
-                    '//*[contains(@class, "verified")]',
-                    '//*[contains(text(), "验证成功")]',
-                    '//*[contains(text(), "Success")]',
-                    '//*[contains(text(), "Verified")]'
-                ]
-                
-                for indicator in success_indicators:
-                    try:
-                        element = driver.find_element(By.XPATH, indicator)
-                        if element.is_displayed():
-                            logger.info('✅ 检测到验证成功指示！')
-                            return True
-                    except:
-                        continue
+                    pass
                 
                 # 每5秒输出一次等待信息
                 elapsed = int(time.time() - start_time)
@@ -400,6 +503,25 @@ class ServerRenewBot:
                 time.sleep(2)
         
         logger.warning('⚠️ Turnstile验证等待超时，但继续执行...')
+        return False
+    
+    def wait_for_turnstile_completion(self, driver, timeout=30):
+        """等待Turnstile验证完成"""
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                token_element = driver.find_element(By.NAME, 'cf-turnstile-response')
+                token_value = token_element.get_attribute('value')
+                
+                if token_value and len(token_value) > 10:
+                    logger.info('✅ Turnstile验证完成！')
+                    return True
+                    
+            except:
+                pass
+            
+            time.sleep(1)
+            
         return False
     
     async def run_with_playwright(self):

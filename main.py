@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-自动续期脚本 - GitHub Actions版本
-支持多种浏览器方案和智能Turnstile处理
+真实鼠标点击版本 - 专门处理Turnstile验证
+使用pyautogui进行真实的鼠标操作，绕过自动化检测
 """
 
 import os
@@ -24,7 +24,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class ServerRenewBot:
+class RealMouseRenewBot:
     def __init__(self):
         # 从环境变量获取配置
         self.email = os.getenv('EMAIL')
@@ -37,637 +37,134 @@ class ServerRenewBot:
             logger.error('❌ 请设置 EMAIL 和 PASSWORD 环境变量')
             sys.exit(1)
         
-        # 验证URL格式
-        if not self.login_url.startswith('http'):
-            logger.error(f'❌ 无效的登录URL: {self.login_url}')
-            sys.exit(1)
-            
-        if not self.renew_url.startswith('http'):
-            logger.error(f'❌ 无效的续期URL: {self.renew_url}')
-            sys.exit(1)
-        
-        logger.info(f'🚀 开始执行续期任务 - {datetime.now()}')
+        logger.info(f'🚀 开始执行真实鼠标点击续期任务 - {datetime.now()}')
         logger.info(f'📧 邮箱: {self.email[:3]}***{self.email.split("@")[1]}')
         logger.info(f'🔗 登录URL: {self.login_url}')
         logger.info(f'🔗 续期URL: {self.renew_url}')
     
-    def random_delay(self, min_sec=1, max_sec=3):
-        """随机延迟，模拟人类行为"""
-        delay = random.uniform(min_sec, max_sec)
-        time.sleep(delay)
+    def setup_pyautogui(self):
+        """设置pyautogui"""
+        try:
+            import pyautogui
+            
+            # 设置pyautogui参数
+            pyautogui.FAILSAFE = True  # 启用故障安全
+            pyautogui.PAUSE = 0.1  # 每次操作间隔
+            
+            # 检查屏幕尺寸
+            screen_width, screen_height = pyautogui.size()
+            logger.info(f'🖥️ 屏幕尺寸: {screen_width}x{screen_height}')
+            
+            return pyautogui
+            
+        except ImportError:
+            logger.error('❌ pyautogui 未安装，请运行: pip install pyautogui')
+            return None
+        except Exception as e:
+            logger.error(f'❌ 设置pyautogui失败: {e}')
+            return None
     
-    def human_type(self, element, text):
-        """模拟人类输入"""
-        element.clear()
-        for char in text:
-            element.send_keys(char)
-            time.sleep(random.uniform(0.05, 0.15))
+    def setup_virtual_display(self):
+        """设置虚拟显示（有头模式）"""
+        try:
+            # 在GitHub Actions中，我们需要设置虚拟显示
+            if os.getenv('GITHUB_ACTIONS'):
+                logger.info('🖥️ 检测到GitHub Actions环境，设置虚拟显示...')
+                
+                # 确保显示服务器在运行
+                import subprocess
+                
+                # 检查DISPLAY环境变量
+                display = os.getenv('DISPLAY', ':99')
+                logger.info(f'使用显示: {display}')
+                
+                # 设置窗口管理器（可选）
+                try:
+                    subprocess.Popen(['fluxbox'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    time.sleep(2)
+                    logger.info('✅ 窗口管理器已启动')
+                except:
+                    logger.info('ℹ️ 窗口管理器启动失败，继续执行')
+                
+                return True
+            else:
+                logger.info('ℹ️ 本地环境，无需设置虚拟显示')
+                return True
+                
+        except Exception as e:
+            logger.warning(f'⚠️ 设置虚拟显示失败: {e}')
+            return False
     
-    async def run_with_selenium(self):
-        """使用 undetected-chromedriver 方案"""
+    async def run_with_real_mouse(self):
+        """使用真实鼠标操作的Selenium方案"""
         try:
             import undetected_chromedriver as uc
             from selenium.webdriver.common.by import By
             from selenium.webdriver.support.ui import WebDriverWait
             from selenium.webdriver.support import expected_conditions as EC
-            from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
-            from selenium.webdriver.common.action_chains import ActionChains
+            from selenium.common.exceptions import TimeoutException, NoSuchElementException
             
-            logger.info('🔧 初始化 undetected-chromedriver...')
+            # 设置虚拟显示
+            if not self.setup_virtual_display():
+                logger.error('❌ 虚拟显示设置失败')
+                return False
+            
+            # 设置pyautogui
+            pyautogui = self.setup_pyautogui()
+            if not pyautogui:
+                logger.error('❌ pyautogui设置失败')
+                return False
+            
+            logger.info('🔧 初始化有头模式Chrome...')
             
             options = uc.ChromeOptions()
-            options.add_argument('--headless=new')  # 新版headless模式
+            
+            # 关键：不使用headless模式！
+            # options.add_argument('--headless')  # 注释掉这行
+            
+            # 基本设置
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--disable-gpu')
-            options.add_argument('--window-size=1920,1080')
+            options.add_argument('--window-size=1366,768')
+            options.add_argument('--window-position=0,0')
+            
+            # 反检测设置
             options.add_argument('--disable-blink-features=AutomationControlled')
             options.add_argument('--disable-extensions')
             options.add_argument('--no-first-run')
             options.add_argument('--disable-default-apps')
-            options.add_argument('--disable-features=VizDisplayCompositor')
-            options.add_argument('--disable-web-security')
-            options.add_argument('--allow-running-insecure-content')
-            options.add_argument('--disable-background-timer-throttling')
-            options.add_argument('--disable-backgrounding-occluded-windows')
-            options.add_argument('--disable-renderer-backgrounding')
-            options.add_argument('--disable-ipc-flooding-protection')
             
-            # 随机User-Agent
-            user_agents = [
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            ]
-            options.add_argument(f'--user-agent={random.choice(user_agents)}')
+            # 用户代理
+            ua = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            options.add_argument(f'--user-agent={ua}')
             
-            # 使用兼容的实验选项设置方式
-            try:
-                # 尝试新的设置方式
-                prefs = {
-                    "profile.default_content_setting_values.notifications": 2,
-                    "profile.managed_default_content_settings.images": 2
-                }
-                options.add_experimental_option("prefs", prefs)
-            except Exception as e:
-                logger.warning(f'实验选项设置失败: {e}')
+            # GitHub Actions环境特殊设置
+            if os.getenv('GITHUB_ACTIONS'):
+                options.add_argument('--display=:99')
+                options.add_argument('--no-xshm')  # 禁用共享内存
             
-            # 创建驱动实例，使用更兼容的参数
             driver = uc.Chrome(
                 options=options, 
                 version_main=None,
-                driver_executable_path=None,
-                browser_executable_path=None,
                 use_subprocess=True
             )
             
-            # 反检测脚本
-            driver.execute_script("""
-                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-                window.chrome = {runtime: {}, loadTimes: function() {}, csi: function() {}, app: {}};
-            """)
-            
             wait = WebDriverWait(driver, 30)
             
             try:
-                # === 登录流程 ===
-                logger.info('🌐 访问登录页面...')
-                driver.get(self.login_url)
-                self.random_delay(2, 4)
-                
-                # 等待登录表单加载
-                try:
-                    login_form = wait.until(
-                        EC.any_of(
-                            EC.presence_of_element_located((By.ID, 'login-form')),
-                            EC.presence_of_element_located((By.ID, 'email'))
-                        )
-                    )
-                    logger.info('✅ 登录表单已加载')
-                except TimeoutException:
-                    logger.error('❌ 登录表单加载超时')
-                    driver.save_screenshot('/tmp/login_form_timeout.png')
-                    return False
-                
-                # 输入登录信息
-                try:
-                    email_field = wait.until(EC.element_to_be_clickable((By.ID, 'email')))
-                    password_field = driver.find_element(By.ID, 'password')
-                    login_btn = driver.find_element(By.ID, 'submit')
-                    
-                    logger.info('⌨️ 输入登录信息...')
-                    self.human_type(email_field, self.email)
-                    self.random_delay(0.5, 1.5)
-                    self.human_type(password_field, self.password)
-                    self.random_delay(1, 2)
-                    
-                    logger.info('🖱️ 点击登录按钮...')
-                    login_btn.click()
-                    
-                except (TimeoutException, NoSuchElementException) as e:
-                    logger.error(f'❌ 登录元素未找到: {e}')
-                    driver.save_screenshot('/tmp/login_elements_not_found.png')
-                    return False
-                
-                # 等待登录完成
-                logger.info('⏳ 等待登录完成...')
-                time.sleep(5)
-                
-                # 检查登录结果
-                current_url = driver.current_url
-                if 'dashboard' not in current_url and 'admin' not in current_url:
-                    logger.error(f'❌ 登录失败，当前URL: {current_url}')
-                    
-                    # 检查是否有错误信息
-                    try:
-                        error_elements = driver.find_elements(By.CSS_SELECTOR, '.alert-danger, .error, .invalid-feedback')
-                        for elem in error_elements:
-                            if elem.is_displayed():
-                                logger.error(f'登录错误信息: {elem.text}')
-                    except:
-                        pass
-                    
-                    driver.save_screenshot('/tmp/login_failed.png')
-                    return False
-                
-                logger.info('✅ 登录成功！')
-                
-                # === 续期流程 ===
-                logger.info('🌐 访问续期页面...')
-                driver.get(self.renew_url)
-                self.random_delay(3, 5)
-                
-                # 查找续期按钮
-                renew_button_selectors = [
-                    'button.btn.btn-outline-primary',
-                    'button[type="submit"]',
-                    '.btn-primary',
-                    '//button[contains(text(), "续期")]',
-                    '//button[contains(text(), "Renew")]',
-                    '//button[contains(text(), "延期")]'
-                ]
-                
-                renew_btn = None
-                for selector in renew_button_selectors:
-                    try:
-                        if selector.startswith('//'):
-                            # 这是XPath选择器
-                            renew_btn = wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
-                        else:
-                            # 这是CSS选择器
-                            renew_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
-                        
-                        logger.info(f'✅ 找到续期按钮: {selector}')
-                        break
-                    except TimeoutException:
-                        continue
-                
-                if not renew_btn:
-                    logger.error('❌ 未找到续期按钮')
-                    driver.save_screenshot('/tmp/renew_button_not_found.png')
-                    return False
-                
-                logger.info('🖱️ 点击续期按钮...')
-                driver.execute_script("arguments[0].scrollIntoView(true);", renew_btn)
-                time.sleep(1)
-                renew_btn.click()
-                
-                # === Turnstile验证处理 ===
-                logger.info('🔐 开始处理Turnstile验证...')
-                await self.handle_turnstile_selenium(driver, wait)
-                
-                # 最终确认
+                # 等待浏览器完全加载
                 time.sleep(3)
+                
+                # 最大化窗口确保元素可见
                 try:
-                    # 查找可能的确认按钮
-                    confirm_selectors = [
-                        'button[type="submit"]',
-                        '.btn-success',
-                        '.btn-primary:not(.btn-outline-primary)',
-                        '//button[contains(text(), "确认")]',
-                        '//button[contains(text(), "Confirm")]',
-                        '//button[contains(text(), "完成")]'
-                    ]
-                    
-                    for selector in confirm_selectors:
-                        try:
-                            if selector.startswith('//'):
-                                # XPath选择器
-                                confirm_btn = driver.find_element(By.XPATH, selector)
-                            else:
-                                # CSS选择器
-                                confirm_btn = driver.find_element(By.CSS_SELECTOR, selector)
-                            
-                            if confirm_btn.is_displayed() and confirm_btn.is_enabled():
-                                logger.info(f'🖱️ 点击确认按钮: {selector}')
-                                confirm_btn.click()
-                                time.sleep(3)
-                                break
-                        except (NoSuchElementException, TimeoutException):
-                            continue
-                            
-                except Exception as e:
-                    logger.info(f'ℹ️ 没有额外的确认步骤: {e}')
-                
-                # 保存成功截图
-                driver.save_screenshot('/tmp/selenium_success.png')
-                logger.info('✅ Selenium方案执行完成！')
-                return True
-                
-            except Exception as e:
-                logger.error(f'❌ Selenium方案执行出错: {e}')
-                driver.save_screenshot('/tmp/selenium_error.png')
-                return False
-                
-        except ImportError:
-            logger.error('❌ undetected-chromedriver 未安装')
-            return False
-        except Exception as e:
-            logger.error(f'❌ Selenium初始化失败: {e}')
-            return False
-        finally:
-            try:
-                if 'driver' in locals():
-                    driver.quit()
-            except:
-                pass
-    
-    async def handle_turnstile_selenium(self, driver, wait):
-        """处理Turnstile验证 - Selenium版本 - 改进版"""
-        max_wait_time = 90  # 最大等待90秒
-        start_time = time.time()
-        
-        logger.info('🔍 寻找Turnstile验证框...')
-        
-        # 首先注入 screenX/screenY 补丁来绕过检测
-        logger.info('🛡️ 注入Turnstile绕过补丁...')
-        turnstile_patch_script = """
-        // CDP MouseEvent screenX/screenY 补丁
-        (function() {
-            const originalAddEventListener = EventTarget.prototype.addEventListener;
-            EventTarget.prototype.addEventListener = function(type, listener, options) {
-                if (type === 'click' || type === 'mousedown' || type === 'mouseup') {
-                    const wrappedListener = function(event) {
-                        if (event.isTrusted === false) {
-                            // 为自动化事件添加真实的屏幕坐标
-                            Object.defineProperty(event, 'screenX', {
-                                value: event.clientX + window.screenX + Math.floor(Math.random() * 10),
-                                writable: false
-                            });
-                            Object.defineProperty(event, 'screenY', {
-                                value: event.clientY + window.screenY + Math.floor(Math.random() * 10),
-                                writable: false
-                            });
-                        }
-                        return listener.call(this, event);
-                    };
-                    return originalAddEventListener.call(this, type, wrappedListener, options);
-                }
-                return originalAddEventListener.call(this, type, listener, options);
-            };
-            
-            // 重写鼠标事件构造函数
-            const originalMouseEvent = window.MouseEvent;
-            window.MouseEvent = function(type, eventInitDict) {
-                if (eventInitDict && typeof eventInitDict.screenX === 'undefined') {
-                    eventInitDict.screenX = (eventInitDict.clientX || 0) + window.screenX + Math.floor(Math.random() * 10);
-                    eventInitDict.screenY = (eventInitDict.clientY || 0) + window.screenY + Math.floor(Math.random() * 10);
-                }
-                return new originalMouseEvent(type, eventInitDict);
-            };
-            
-            console.log('Turnstile绕过补丁已注入');
-        })();
-        """
-        
-        try:
-            driver.execute_script(turnstile_patch_script)
-            logger.info('✅ 补丁注入成功')
-        except Exception as e:
-            logger.warning(f'⚠️ 补丁注入失败: {e}')
-        
-        while time.time() - start_time < max_wait_time:
-            try:
-                # 方法1: 检查cf-turnstile-response是否有值
-                try:
-                    token_element = driver.find_element(By.NAME, 'cf-turnstile-response')
-                    token_value = token_element.get_attribute('value')
-                    
-                    if token_value and len(token_value) > 10:
-                        logger.info('✅ 检测到Turnstile验证已完成！')
-                        return True
+                    driver.maximize_window()
+                    logger.info('✅ 浏览器窗口已最大化')
                 except:
-                    pass
+                    logger.info('ℹ️ 窗口最大化失败，继续执行')
                 
-                # 方法2: 寻找Turnstile iframe并点击其中的checkbox
-                try:
-                    # 查找所有iframe
-                    iframes = driver.find_elements(By.TAG_NAME, 'iframe')
-                    for iframe in iframes:
-                        src = iframe.get_attribute('src') or ''
-                        if 'challenges.cloudflare.com' in src or 'turnstile' in src:
-                            logger.info('🎯 找到Turnstile iframe')
-                            
-                            # 切换到iframe
-                            driver.switch_to.frame(iframe)
-                            
-                            try:
-                                # 查找checkbox - 使用多种选择器
-                                checkbox_selectors = [
-                                    'input[type="checkbox"]',
-                                    '[role="checkbox"]',
-                                    '.cb-i',
-                                    '.checkbox',
-                                    'span[role="checkbox"]'
-                                ]
-                                
-                                for selector in checkbox_selectors:
-                                    try:
-                                        checkbox = driver.find_element(By.CSS_SELECTOR, selector)
-                                        if checkbox.is_displayed():
-                                            logger.info(f'🖱️ 找到并点击checkbox: {selector}')
-                                            
-                                            # 使用JavaScript点击以避免被检测
-                                            driver.execute_script("""
-                                                arguments[0].dispatchEvent(new MouseEvent('mouseover', {
-                                                    bubbles: true,
-                                                    cancelable: true,
-                                                    view: window,
-                                                    screenX: arguments[0].getBoundingClientRect().x + window.screenX + 5,
-                                                    screenY: arguments[0].getBoundingClientRect().y + window.screenY + 5
-                                                }));
-                                            """, checkbox)
-                                            time.sleep(0.5)
-                                            
-                                            driver.execute_script("""
-                                                arguments[0].dispatchEvent(new MouseEvent('mousedown', {
-                                                    bubbles: true,
-                                                    cancelable: true,
-                                                    view: window,
-                                                    screenX: arguments[0].getBoundingClientRect().x + window.screenX + 5,
-                                                    screenY: arguments[0].getBoundingClientRect().y + window.screenY + 5
-                                                }));
-                                            """, checkbox)
-                                            time.sleep(0.1)
-                                            
-                                            driver.execute_script("""
-                                                arguments[0].dispatchEvent(new MouseEvent('mouseup', {
-                                                    bubbles: true,
-                                                    cancelable: true,
-                                                    view: window,
-                                                    screenX: arguments[0].getBoundingClientRect().x + window.screenX + 5,
-                                                    screenY: arguments[0].getBoundingClientRect().y + window.screenY + 5
-                                                }));
-                                            """, checkbox)
-                                            time.sleep(0.1)
-                                            
-                                            driver.execute_script("""
-                                                arguments[0].dispatchEvent(new MouseEvent('click', {
-                                                    bubbles: true,
-                                                    cancelable: true,
-                                                    view: window,
-                                                    screenX: arguments[0].getBoundingClientRect().x + window.screenX + 5,
-                                                    screenY: arguments[0].getBoundingClientRect().y + window.screenY + 5
-                                                }));
-                                            """, checkbox)
-                                            
-                                            logger.info('✅ 已点击Turnstile checkbox')
-                                            driver.switch_to.default_content()
-                                            
-                                            # 等待验证完成
-                                            time.sleep(3)
-                                            return self.wait_for_turnstile_completion(driver, 30)
-                                            
-                                    except Exception as e:
-                                        continue
-                                        
-                            except Exception as e:
-                                logger.warning(f'⚠️ iframe内操作失败: {e}')
-                            finally:
-                                driver.switch_to.default_content()
-                            
-                            break
-                            
-                except Exception as e:
-                    pass
-                
-                # 方法3: 尝试点击外部容器
-                try:
-                    turnstile_containers = driver.find_elements(By.CSS_SELECTOR, '[data-sitekey], .cf-turnstile, [id*="turnstile"]')
-                    for container in turnstile_containers:
-                        if container.is_displayed():
-                            logger.info('🎯 找到Turnstile容器，尝试点击')
-                            
-                            # 滚动到元素
-                            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", container)
-                            time.sleep(1)
-                            
-                            # 使用改进的点击方法
-                            driver.execute_script("""
-                                const element = arguments[0];
-                                const rect = element.getBoundingClientRect();
-                                const x = rect.left + rect.width / 2;
-                                const y = rect.top + rect.height / 2;
-                                
-                                const clickEvent = new MouseEvent('click', {
-                                    bubbles: true,
-                                    cancelable: true,
-                                    view: window,
-                                    clientX: x,
-                                    clientY: y,
-                                    screenX: x + window.screenX + Math.floor(Math.random() * 10),
-                                    screenY: y + window.screenY + Math.floor(Math.random() * 10)
-                                });
-                                
-                                element.dispatchEvent(clickEvent);
-                            """, container)
-                            
-                            time.sleep(2)
-                            break
-                            
-                except Exception as e:
-                    pass
-                
-                # 每5秒输出一次等待信息
-                elapsed = int(time.time() - start_time)
-                if elapsed % 5 == 0 and elapsed > 0:
-                    logger.info(f'⏳ Turnstile验证等待中... ({elapsed}/{max_wait_time}秒)')
-                
-                time.sleep(1)
-                
-            except Exception as e:
-                logger.warning(f'⚠️ Turnstile处理中的异常: {e}')
-                time.sleep(2)
-        
-        logger.warning('⚠️ Turnstile验证等待超时，但继续执行...')
-        return False
-    
-    def wait_for_turnstile_completion(self, driver, timeout=30):
-        """等待Turnstile验证完成"""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            try:
-                token_element = driver.find_element(By.NAME, 'cf-turnstile-response')
-                token_value = token_element.get_attribute('value')
-                
-                if token_value and len(token_value) > 10:
-                    logger.info('✅ Turnstile验证完成！')
-                    return True
-                    
-            except:
-                pass
-            
-            time.sleep(1)
-            
-        return False
-    
-    async def run_with_playwright(self):
-        """使用 Playwright 方案"""
-        try:
-            from playwright.async_api import async_playwright
-            
-            logger.info('🔧 初始化 Playwright...')
-            
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=True,
-                    args=[
-                        '--no-sandbox',
-                        '--disable-dev-shm-usage',
-                        '--disable-gpu',
-                        '--disable-blink-features=AutomationControlled',
-                        '--disable-features=VizDisplayCompositor'
-                    ]
-                )
-                
-                context = await browser.new_context(
-                    viewport={'width': 1920, 'height': 1080},
-                    user_agent=random.choice([
-                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                    ])
-                )
-                
-                page = await context.new_page()
-                
-                # 注入反检测脚本
-                await page.add_init_script("""
-                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-                    window.chrome = {runtime: {}, loadTimes: function() {}, csi: function() {}, app: {}};
-                """)
-                
-                try:
-                    # 登录流程
-                    logger.info('🌐 Playwright: 访问登录页面...')
-                    await page.goto(self.login_url, wait_until='networkidle')
-                    
-                    await page.wait_for_selector('#email', timeout=30000)
-                    
-                    # 模拟人类输入
-                    await page.fill('#email', '')  # 先清空
-                    await page.type('#email', self.email, delay=random.randint(50, 150))
-                    await page.wait_for_timeout(random.randint(500, 1500))
-                    
-                    await page.fill('#password', '')
-                    await page.type('#password', self.password, delay=random.randint(50, 150))
-                    await page.wait_for_timeout(random.randint(1000, 2000))
-                    
-                    logger.info('🖱️ Playwright: 点击登录...')
-                    await page.click('#submit')
-                    await page.wait_for_load_state('networkidle')
-                    
-                    # 检查登录结果
-                    current_url = page.url
-                    if 'dashboard' not in current_url and 'admin' not in current_url:
-                        logger.error(f'❌ Playwright: 登录失败，当前URL: {current_url}')
-                        await page.screenshot(path='/tmp/playwright_login_failed.png')
-                        return False
-                    
-                    logger.info('✅ Playwright: 登录成功！')
-                    
-                    # 续期流程
-                    logger.info('🌐 Playwright: 访问续期页面...')
-                    await page.goto(self.renew_url, wait_until='networkidle')
-                    
-                    # 查找并点击续期按钮
-                    renew_selectors = [
-                        'button.btn.btn-outline-primary',
-                        'button[type="submit"]',
-                        '.btn-primary'
-                    ]
-                    
-                    renew_clicked = False
-                    for selector in renew_selectors:
-                        try:
-                            await page.wait_for_selector(selector, timeout=10000)
-                            await page.click(selector)
-                            logger.info(f'✅ Playwright: 点击续期按钮: {selector}')
-                            renew_clicked = True
-                            break
-                        except:
-                            continue
-                    
-                    if not renew_clicked:
-                        logger.error('❌ Playwright: 未找到续期按钮')
-                        await page.screenshot(path='/tmp/playwright_no_renew_button.png')
-                        return False
-                    
-                    # 处理Turnstile
-                    logger.info('🔐 Playwright: 处理Turnstile验证...')
-                    await self.handle_turnstile_playwright(page)
-                    
-                    # 等待完成
-                    await page.wait_for_timeout(5000)
-                    await page.screenshot(path='/tmp/playwright_final.png')
-                    
-                    logger.info('✅ Playwright方案执行完成！')
-                    return True
-                    
-                except Exception as e:
-                    logger.error(f'❌ Playwright执行出错: {e}')
-                    await page.screenshot(path='/tmp/playwright_error.png')
-                    return False
-                finally:
-                    await browser.close()
-                    
-        except ImportError:
-            logger.error('❌ Playwright 未安装')
-            return False
-        except Exception as e:
-            logger.error(f'❌ Playwright初始化失败: {e}')
-            return False
-    
-    async def run_with_basic_selenium(self):
-        """使用基础 Selenium 作为备用方案"""
-        try:
-            from selenium import webdriver
-            from selenium.webdriver.chrome.options import Options
-            from selenium.webdriver.common.by import By
-            from selenium.webdriver.support.ui import WebDriverWait
-            from selenium.webdriver.support import expected_conditions as EC
-            from selenium.common.exceptions import TimeoutException, NoSuchElementException
-            
-            logger.info('🔧 初始化基础 Selenium（备用方案）...')
-            
-            options = Options()
-            options.add_argument('--headless')
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--disable-gpu')
-            options.add_argument('--window-size=1920,1080')
-            options.add_argument('--disable-blink-features=AutomationControlled')
-            options.add_argument('--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-            
-            driver = webdriver.Chrome(options=options)
-            wait = WebDriverWait(driver, 30)
-            
-            try:
                 # 登录流程
-                logger.info('🌐 基础Selenium: 访问登录页面...')
+                logger.info('🌐 访问登录页面...')
                 driver.get(self.login_url)
                 time.sleep(3)
                 
@@ -676,6 +173,8 @@ class ServerRenewBot:
                 password_field = driver.find_element(By.ID, 'password')
                 login_btn = driver.find_element(By.ID, 'submit')
                 
+                # 使用真实的键盘输入（可选）
+                logger.info('⌨️ 输入登录信息...')
                 email_field.clear()
                 email_field.send_keys(self.email)
                 time.sleep(1)
@@ -684,216 +183,278 @@ class ServerRenewBot:
                 password_field.send_keys(self.password)
                 time.sleep(1)
                 
-                logger.info('🖱️ 基础Selenium: 点击登录...')
-                login_btn.click()
+                # 使用真实鼠标点击登录按钮
+                logger.info('🖱️ 使用真实鼠标点击登录按钮...')
+                self.real_mouse_click(driver, login_btn, pyautogui)
+                
+                # 等待登录完成
                 time.sleep(5)
                 
-                # 检查登录结果
                 if 'dashboard' not in driver.current_url:
-                    logger.error(f'❌ 基础Selenium: 登录失败，当前URL: {driver.current_url}')
-                    driver.save_screenshot('/tmp/basic_selenium_login_failed.png')
+                    logger.error(f'❌ 登录失败，当前URL: {driver.current_url}')
+                    driver.save_screenshot('/tmp/real_mouse_login_failed.png')
                     return False
                 
-                logger.info('✅ 基础Selenium: 登录成功！')
+                logger.info('✅ 登录成功！')
                 
                 # 续期流程
-                logger.info('🌐 基础Selenium: 访问续期页面...')
+                logger.info('🌐 访问续期页面...')
                 driver.get(self.renew_url)
                 time.sleep(3)
                 
                 # 查找续期按钮
-                renew_btn = None
-                selectors = [
-                    'button.btn.btn-outline-primary',
-                    'button[type="submit"]',
-                    '.btn-primary'
-                ]
+                renew_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button.btn.btn-outline-primary')))
                 
-                for selector in selectors:
-                    try:
-                        renew_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
-                        logger.info(f'✅ 基础Selenium: 找到续期按钮: {selector}')
-                        break
-                    except TimeoutException:
-                        continue
+                # 使用真实鼠标点击续期按钮
+                logger.info('🖱️ 使用真实鼠标点击续期按钮...')
+                self.real_mouse_click(driver, renew_btn, pyautogui)
                 
-                if not renew_btn:
-                    logger.error('❌ 基础Selenium: 未找到续期按钮')
-                    driver.save_screenshot('/tmp/basic_selenium_no_button.png')
-                    return False
-                
-                logger.info('🖱️ 基础Selenium: 点击续期按钮...')
-                renew_btn.click()
+                # 等待Turnstile加载
                 time.sleep(5)
                 
-                # 简单等待（不处理复杂的Turnstile）
-                logger.info('⏳ 基础Selenium: 等待页面响应...')
-                time.sleep(10)
+                # 处理Turnstile验证
+                logger.info('🔐 开始使用真实鼠标处理Turnstile验证...')
+                success = await self.handle_turnstile_with_real_mouse(driver, pyautogui)
                 
-                driver.save_screenshot('/tmp/basic_selenium_final.png')
-                logger.info('✅ 基础Selenium: 执行完成')
+                if success:
+                    logger.info('🎉 Turnstile验证成功！')
+                else:
+                    logger.warning('⚠️ Turnstile验证可能未完成，但继续执行')
+                
+                # 等待最终完成
+                time.sleep(5)
+                
+                # 保存最终截图
+                driver.save_screenshot('/tmp/real_mouse_final.png')
+                logger.info('✅ 真实鼠标方案执行完成！')
                 return True
                 
             except Exception as e:
-                logger.error(f'❌ 基础Selenium执行错误: {e}')
-                driver.save_screenshot('/tmp/basic_selenium_error.png')
+                logger.error(f'❌ 真实鼠标方案执行出错: {e}')
+                driver.save_screenshot('/tmp/real_mouse_error.png')
                 return False
             finally:
                 driver.quit()
                 
-        except ImportError:
-            logger.error('❌ 基础Selenium不可用')
+        except ImportError as e:
+            logger.error(f'❌ 导入错误: {e}')
+            logger.error('请安装所需依赖: pip install undetected-chromedriver pyautogui pillow')
             return False
         except Exception as e:
-            logger.error(f'❌ 基础Selenium初始化失败: {e}')
+            logger.error(f'❌ 真实鼠标方案初始化失败: {e}')
             return False
     
-    async def handle_turnstile_playwright(self, page):
-        """处理Turnstile验证 - Playwright版本"""
-        max_wait_time = 90
-        
+    def real_mouse_click(self, driver, element, pyautogui):
+        """使用真实鼠标点击元素"""
         try:
-            # 等待Turnstile加载
-            await page.wait_for_timeout(5000)
+            # 滚动到元素位置
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+            time.sleep(0.5)
             
-            # 尝试多种方法处理Turnstile
-            turnstile_selectors = [
-                '[data-sitekey]',
-                '.cf-turnstile',
-                'iframe[src*="turnstile"]'
-            ]
+            # 获取元素位置
+            location = element.location_once_scrolled_into_view
+            size = element.size
             
-            for selector in turnstile_selectors:
-                try:
-                    element = await page.wait_for_selector(selector, timeout=10000)
-                    if element:
-                        logger.info(f'🎯 Playwright: 找到Turnstile: {selector}')
-                        await element.hover()
-                        await page.wait_for_timeout(1000)
-                        await element.click()
-                        await page.wait_for_timeout(3000)
-                        break
-                except:
-                    continue
+            # 计算点击位置（元素中心）
+            click_x = location['x'] + size['width'] // 2
+            click_y = location['y'] + size['height'] // 2
             
-            # 等待验证完成
-            try:
-                await page.wait_for_function(
-                    '''() => {
-                        const token = document.querySelector('[name="cf-turnstile-response"]');
-                        return token && token.value && token.value.length > 10;
-                    }''',
-                    timeout=max_wait_time * 1000
-                )
-                logger.info('✅ Playwright: Turnstile验证完成！')
-                return True
-            except:
-                logger.warning('⚠️ Playwright: Turnstile验证可能未完成')
-                return False
-                
+            logger.info(f'🎯 元素位置: ({location["x"]}, {location["y"]}), 尺寸: ({size["width"]}, {size["height"]})')
+            logger.info(f'🖱️ 真实鼠标点击位置: ({click_x}, {click_y})')
+            
+            # 使用pyautogui进行真实鼠标点击
+            pyautogui.click(click_x, click_y, duration=0.2)
+            logger.info('✅ 真实鼠标点击完成')
+            
+            return True
+            
         except Exception as e:
-            logger.warning(f'⚠️ Playwright: Turnstile处理异常: {e}')
-            return False
-        """处理Turnstile验证 - Playwright版本"""
+            logger.error(f'❌ 真实鼠标点击失败: {e}')
+            
+            # 备用方案：JavaScript点击
+            try:
+                driver.execute_script("arguments[0].click();", element)
+                logger.info('✅ 备用JavaScript点击完成')
+                return True
+            except Exception as e2:
+                logger.error(f'❌ JavaScript点击也失败: {e2}')
+                return False
+    
+    async def handle_turnstile_with_real_mouse(self, driver, pyautogui):
+        """使用真实鼠标处理Turnstile验证"""
         max_wait_time = 90
+        start_time = time.time()
         
-        try:
-            # 等待Turnstile加载
-            await page.wait_for_timeout(5000)
-            
-            # 尝试多种方法处理Turnstile
-            turnstile_selectors = [
-                '[data-sitekey]',
-                '.cf-turnstile',
-                'iframe[src*="turnstile"]'
-            ]
-            
-            for selector in turnstile_selectors:
-                try:
-                    element = await page.wait_for_selector(selector, timeout=10000)
-                    if element:
-                        logger.info(f'🎯 Playwright: 找到Turnstile: {selector}')
-                        await element.hover()
-                        await page.wait_for_timeout(1000)
-                        await element.click()
-                        await page.wait_for_timeout(3000)
-                        break
-                except:
-                    continue
-            
-            # 等待验证完成
+        logger.info('🔍 寻找Turnstile验证框...')
+        
+        while time.time() - start_time < max_wait_time:
             try:
-                await page.wait_for_function(
-                    '''() => {
-                        const token = document.querySelector('[name="cf-turnstile-response"]');
-                        return token && token.value && token.value.length > 10;
-                    }''',
-                    timeout=max_wait_time * 1000
-                )
-                logger.info('✅ Playwright: Turnstile验证完成！')
-                return True
-            except:
-                logger.warning('⚠️ Playwright: Turnstile验证可能未完成')
-                return False
+                # 检查是否已经完成验证
+                if self.check_turnstile_completion(driver):
+                    logger.info('✅ Turnstile验证已完成！')
+                    return True
                 
-        except Exception as e:
-            logger.warning(f'⚠️ Playwright: Turnstile处理异常: {e}')
-            return False
+                # 查找所有iframe
+                iframes = driver.find_elements(By.TAG_NAME, 'iframe')
+                logger.info(f'🔍 找到 {len(iframes)} 个iframe')
+                
+                for i, iframe in enumerate(iframes):
+                    try:
+                        src = iframe.get_attribute('src') or ''
+                        logger.info(f'iframe {i+1}: {src}')
+                        
+                        # 检查是否是Turnstile iframe
+                        if any(keyword in src.lower() for keyword in ['challenges.cloudflare.com', 'turnstile']):
+                            logger.info(f'🎯 发现Turnstile iframe {i+1}')
+                            
+                            # 切换到iframe
+                            driver.switch_to.frame(iframe)
+                            
+                            # 查找checkbox
+                            checkbox_selectors = [
+                                'input[type="checkbox"]',
+                                '[role="checkbox"]',
+                                '.cb-i',
+                                'span[role="checkbox"]',
+                                'div[role="checkbox"]'
+                            ]
+                            
+                            for selector in checkbox_selectors:
+                                try:
+                                    checkboxes = driver.find_elements(By.CSS_SELECTOR, selector)
+                                    logger.info(f'选择器 {selector} 找到 {len(checkboxes)} 个元素')
+                                    
+                                    for j, checkbox in enumerate(checkboxes):
+                                        try:
+                                            if checkbox.is_displayed():
+                                                logger.info(f'🖱️ 尝试真实鼠标点击复选框 {j+1}')
+                                                
+                                                # 获取iframe在页面中的位置
+                                                iframe_rect = driver.execute_script("""
+                                                    return arguments[0].getBoundingClientRect();
+                                                """, iframe)
+                                                
+                                                # 获取checkbox在iframe中的位置
+                                                checkbox_rect = driver.execute_script("""
+                                                    return arguments[0].getBoundingClientRect();
+                                                """, checkbox)
+                                                
+                                                # 计算checkbox在整个页面中的绝对位置
+                                                absolute_x = iframe_rect['x'] + checkbox_rect['x'] + checkbox_rect['width'] // 2
+                                                absolute_y = iframe_rect['y'] + checkbox_rect['y'] + checkbox_rect['height'] // 2
+                                                
+                                                logger.info(f'🎯 Turnstile复选框绝对位置: ({absolute_x}, {absolute_y})')
+                                                
+                                                # 使用真实鼠标点击
+                                                pyautogui.click(absolute_x, absolute_y, duration=0.3)
+                                                logger.info('✅ 已使用真实鼠标点击Turnstile复选框')
+                                                
+                                                # 等待验证处理
+                                                time.sleep(3)
+                                                
+                                                driver.switch_to.default_content()
+                                                
+                                                # 检查验证是否完成
+                                                if self.check_turnstile_completion(driver):
+                                                    logger.info('🎉 Turnstile验证成功完成！')
+                                                    return True
+                                                
+                                                # 重新进入iframe继续尝试
+                                                driver.switch_to.frame(iframe)
+                                                
+                                        except Exception as e:
+                                            logger.warning(f'处理复选框 {j+1} 失败: {e}')
+                                            
+                                except Exception as e:
+                                    logger.warning(f'查找选择器 {selector} 失败: {e}')
+                            
+                            driver.switch_to.default_content()
+                            
+                    except Exception as e:
+                        logger.warning(f'处理iframe {i+1} 失败: {e}')
+                        driver.switch_to.default_content()
+                
+                # 如果iframe方法失败，尝试主页面元素
+                logger.info('🔍 尝试在主页面查找Turnstile元素...')
+                main_selectors = [
+                    '[data-sitekey]',
+                    '.cf-turnstile',
+                    '[id*="turnstile"]',
+                    '[class*="turnstile"]'
+                ]
+                
+                for selector in main_selectors:
+                    try:
+                        elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                        if elements:
+                            logger.info(f'主页面找到 {len(elements)} 个 {selector} 元素')
+                            
+                            for element in elements:
+                                if element.is_displayed():
+                                    logger.info('🖱️ 尝试真实鼠标点击主页面Turnstile元素')
+                                    
+                                    if self.real_mouse_click(driver, element, pyautogui):
+                                        time.sleep(3)
+                                        if self.check_turnstile_completion(driver):
+                                            logger.info('🎉 主页面Turnstile验证成功！')
+                                            return True
+                                    
+                    except Exception as e:
+                        logger.warning(f'处理主页面选择器 {selector} 失败: {e}')
+                
+                # 等待一段时间再重试
+                elapsed = int(time.time() - start_time)
+                if elapsed % 10 == 0:
+                    logger.info(f'⏳ 真实鼠标Turnstile验证等待中... ({elapsed}/{max_wait_time}秒)')
+                
+                time.sleep(2)
+                
+            except Exception as e:
+                logger.warning(f'⚠️ 真实鼠标Turnstile处理异常: {e}')
+                time.sleep(2)
+        
+        logger.warning('⚠️ 真实鼠标Turnstile验证超时')
+        return False
+    
+    def check_turnstile_completion(self, driver):
+        """检查Turnstile是否已完成"""
+        try:
+            token_element = driver.find_element(By.NAME, 'cf-turnstile-response')
+            token_value = token_element.get_attribute('value')
+            
+            if token_value and len(token_value) > 10:
+                logger.info(f'✅ 检测到Turnstile token: {token_value[:20]}...')
+                return True
+                
+        except:
+            pass
+        
+        return False
     
     async def run(self):
         """主执行函数"""
-        success = False
+        logger.info('🚀 开始真实鼠标点击方案')
         
-        # 尝试方案1: undetected-chromedriver
-        logger.info('📋 === 尝试方案1: undetected-chromedriver ===')
-        try:
-            success = await self.run_with_selenium()
-            if success:
-                logger.info('🎉 方案1执行成功！')
-                return True
-        except Exception as e:
-            logger.error(f'❌ 方案1执行异常: {e}')
+        success = await self.run_with_real_mouse()
         
-        # 如果方案1失败，尝试方案2: Playwright
-        if not success:
-            logger.info('📋 === 尝试方案2: Playwright ===')
-            try:
-                success = await self.run_with_playwright()
-                if success:
-                    logger.info('🎉 方案2执行成功！')
-                    return True
-            except Exception as e:
-                logger.error(f'❌ 方案2执行异常: {e}')
-        
-        # 如果前两个方案都失败，尝试方案3: 基础Selenium
-        if not success:
-            logger.info('📋 === 尝试方案3: 基础Selenium ===')
-            try:
-                success = await self.run_with_basic_selenium()
-                if success:
-                    logger.info('🎉 方案3执行成功！')
-                    return True
-            except Exception as e:
-                logger.error(f'❌ 方案3执行异常: {e}')
-        
-        # 所有方案都失败
-        if not success:
-            logger.error('💥 所有方案都失败了！')
+        if success:
+            logger.info('🎉 真实鼠标方案执行成功！')
+            return True
+        else:
+            logger.error('❌ 真实鼠标方案执行失败！')
             return False
-        
-        return success
 
 async def main():
     """程序入口"""
     try:
-        bot = ServerRenewBot()
+        bot = RealMouseRenewBot()
         success = await bot.run()
         
         if success:
-            logger.info('🎉 ===== 续期任务执行成功！=====')
+            logger.info('🎉 ===== 真实鼠标续期任务执行成功！=====')
             sys.exit(0)
         else:
-            logger.error('💥 ===== 续期任务执行失败！=====')
+            logger.error('💥 ===== 真实鼠标续期任务执行失败！=====')
             sys.exit(1)
             
     except KeyboardInterrupt:

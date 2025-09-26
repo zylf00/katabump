@@ -95,17 +95,34 @@ jobs:
             undetected-chromedriver \
             playwright==1.40.0 \
             requests \
-            loguru
+            loguru \
+            pyautogui \
+            pillow \
+            opencv-python \
+            pynput \
+            psutil
             
       - name: 🎭 安装Playwright浏览器
         run: |
           playwright install chromium
           
-      - name: 🖥️ 启动虚拟显示
+      - name: 🖥️ 设置虚拟显示和窗口管理器
         run: |
-          # 启动Xvfb虚拟显示服务器
-          Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
-          echo "虚拟显示已启动"
+          # 启动Xvfb虚拟显示服务器（有头模式用）
+          Xvfb :99 -screen 0 1366x768x24 -ac -nolisten tcp -dpi 96 > /dev/null 2>&1 &
+          export DISPLAY=:99
+          echo "DISPLAY=:99" >> $GITHUB_ENV
+          
+          # 安装并启动轻量级窗口管理器
+          sudo apt-get install -y fluxbox
+          
+          # 等待显示服务器启动
+          sleep 3
+          
+          # 测试显示是否工作
+          xdpyinfo -display :99 | head -5 || echo "显示测试完成"
+          
+          echo "虚拟显示已设置完成"
           
       - name: 🚀 运行续期脚本
         env:
@@ -113,14 +130,55 @@ jobs:
           PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
           LOGIN_URL: ${{ secrets.LOGIN_URL || 'https://dashboard.katabump.com/auth/login' }}
           RENEW_URL: ${{ secrets.RENEW_URL || 'https://dashboard.katabump.com/servers/edit?id=124653' }}
+          USE_REAL_MOUSE: ${{ secrets.USE_REAL_MOUSE || 'true' }}  # 默认使用真实鼠标
         run: |
           echo "🚀 开始执行续期任务..."
           echo "🔧 配置信息:"
           echo "📧 邮箱: ${EMAIL:0:3}***"
           echo "🔗 登录URL: $LOGIN_URL"
           echo "🔗 续期URL: $RENEW_URL"
+          echo "🖱️ 使用真实鼠标: $USE_REAL_MOUSE"
+          echo "🖥️ 显示设置: $DISPLAY"
           echo "========================"
-          python main.py
+          
+          # 确保临时目录存在
+          mkdir -p /tmp/screenshots
+          
+          # 启动窗口管理器
+          fluxbox > /dev/null 2>&1 &
+          sleep 2
+          
+          # 根据设置选择使用哪个脚本
+          if [ "$USE_REAL_MOUSE" = "true" ]; then
+            echo "🖱️ 使用真实鼠标点击模式"
+            python real_mouse_main.py
+          else
+            echo "🖱️ 使用传统自动化模式"
+            python main.py
+          fi
+          
+      - name: 📸 保存详细调试信息
+        if: always()
+        run: |
+          echo "📸 收集调试信息..."
+          
+          # 列出所有截图文件
+          echo "📂 截图文件:"
+          find /tmp -name "*.png" -type f 2>/dev/null || echo "未找到截图文件"
+          
+          # 检查日志文件
+          echo "📄 日志文件:"
+          if [ -f "renew.log" ]; then
+            echo "找到主日志文件: renew.log ($(wc -l < renew.log) 行)"
+          fi
+          
+          # 检查Chrome进程
+          echo "🔍 Chrome进程:"
+          ps aux | grep chrome | head -5 2>/dev/null || echo "未找到Chrome进程"
+          
+          # 检查显示服务器
+          echo "🖥️ 显示服务器状态:"
+          ps aux | grep Xvfb | head -3 2>/dev/null || echo "Xvfb未运行"
           
       - name: 📊 显示运行状态
         if: always()
@@ -145,10 +203,12 @@ jobs:
         with:
           name: 执行结果-${{ github.run_number }}
           path: |
-            /tmp/*.png
+            /tmp/**/*.png
+            /tmp/screenshots/*.png
             renew.log
             *.log
           retention-days: 7
+          if-no-files-found: ignore7
           if-no-files-found: ignore
           
       - name: 📬 发送通知 (可选)

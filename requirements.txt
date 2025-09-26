@@ -11,3 +11,14 @@ loguru>=0.7.0
 
 # 异步支持
 asyncio
+
+# 鼠标和键盘模拟
+pyautogui>=0.9.50
+pynput>=1.7.6
+
+# 图像处理（用于pyautogui）
+pillow>=9.0.0
+opencv-python>=4.5.0
+
+# 系统控制
+psutil>=5.8.0
